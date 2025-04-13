@@ -9,13 +9,26 @@ import { storage } from '../../../firebase/config';
 const formatDate = (date) => {
   if (!date) return 'Not available';
   try {
-    if (date instanceof Date) {
-      return date.toLocaleString();
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
+      // Handle Firestore Timestamp
+      dateObj = date.toDate();
+    } else if (typeof date === 'string') {
+      // Handle string date
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      // Handle Date object
+      dateObj = date;
+    } else {
+      // Handle any other format
+      dateObj = new Date(date);
     }
-    if (date.toDate) {
-      return date.toDate().toLocaleString();
+
+    if (isNaN(dateObj.getTime())) {
+      return 'Invalid date';
     }
-    return new Date(date).toLocaleString();
+
+    return dateObj.toLocaleString();
   } catch (error) {
     console.error('Error formatting date:', error);
     return 'Invalid date';
@@ -25,32 +38,19 @@ const formatDate = (date) => {
 const StudentSubmission = () => {
   const { assignmentId } = useParams();
   const { user } = useAuthStore();
-  const { fetchAssignment, submitAssignment, loading, error } = useClassStore();
-  const [assignment, setAssignment] = useState(null);
+  const { assignments, fetchAssignments, submitAssignment, loading, error } = useClassStore();
   const [file, setFile] = useState(null);
   const [comment, setComment] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submission, setSubmission] = useState(null);
 
   useEffect(() => {
-    if (assignmentId && user) {
-      loadAssignment();
+    if (user?.uid) {
+      fetchAssignments(user.uid, user.role);
     }
-  }, [assignmentId, user]);
+  }, [user, fetchAssignments]);
 
-  const loadAssignment = async () => {
-    try {
-      const data = await fetchAssignment(assignmentId);
-      if (data) {
-        setAssignment(data);
-        if (data.submission) {
-          setSubmission(data.submission);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading assignment:', error);
-    }
-  };
+  const assignment = assignments.find(a => a.id === assignmentId);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -66,16 +66,16 @@ const StudentSubmission = () => {
     if (!file && !comment) return;
 
     try {
+      const now = new Date();
       const submissionData = {
         assignmentId,
         studentId: user.uid,
         comment,
-        submittedAt: new Date(),
+        submittedAt: now,
+        submittedAtString: now.toISOString(), // Add string version for consistency
       };
 
       if (file) {
-        // Handle file upload here using your storage solution
-        // For example, using Firebase Storage
         const storageRef = storage.ref();
         const fileRef = storageRef.child(`submissions/${assignmentId}/${user.uid}/${file.name}`);
         
@@ -90,24 +90,30 @@ const StudentSubmission = () => {
             console.error('Upload error:', error);
           },
           async () => {
-            const fileUrl = await uploadTask.snapshot.ref.getDownloadURL();
-            submissionData.fileUrl = fileUrl;
-            submissionData.fileName = file.name;
-            
-            await submitAssignment(submissionData);
-            setFile(null);
-            setComment('');
-            setUploadProgress(0);
-            await loadAssignment();
+            try {
+              const fileUrl = await uploadTask.snapshot.ref.getDownloadURL();
+              submissionData.fileUrl = fileUrl;
+              submissionData.fileName = file.name;
+              
+              await submitAssignment(assignmentId, submissionData);
+              setFile(null);
+              setComment('');
+              setUploadProgress(0);
+              await fetchAssignments(user.uid, user.role);
+            } catch (uploadError) {
+              console.error('Error completing submission:', uploadError);
+              alert('Error submitting assignment. Please try again.');
+            }
           }
         );
       } else {
-        await submitAssignment(submissionData);
+        await submitAssignment(assignmentId, submissionData);
         setComment('');
-        await loadAssignment();
+        await fetchAssignments(user.uid, user.role);
       }
     } catch (error) {
       console.error('Submission error:', error);
+      alert('Error submitting assignment. Please try again.');
     }
   };
 

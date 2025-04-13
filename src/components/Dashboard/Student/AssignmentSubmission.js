@@ -4,6 +4,53 @@ import { FaUpload, FaFile, FaClock, FaCheckCircle } from 'react-icons/fa';
 import useClassStore from '../../../store/classStore';
 import useAuthStore from '../../../store/authStore';
 
+const formatDate = (date) => {
+  if (!date) return 'No due date';
+  try {
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
+      // Handle Firestore Timestamp
+      dateObj = date.toDate();
+    } else if (typeof date === 'string') {
+      // Handle string date
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      // Handle Date object
+      dateObj = date;
+    } else {
+      // Handle any other format
+      dateObj = new Date(date);
+    }
+
+    if (isNaN(dateObj.getTime())) {
+      return 'Invalid date';
+    }
+
+    return dateObj.toLocaleDateString();
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
+
+const isDatePassed = (date) => {
+  if (!date) return false;
+  try {
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
+      dateObj = date.toDate();
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else {
+      dateObj = new Date(date);
+    }
+    return dateObj < new Date();
+  } catch (error) {
+    console.error('Error comparing dates:', error);
+    return false;
+  }
+};
+
 const AssignmentSubmission = () => {
   const { user } = useAuthStore();
   const { assignments, loading, error, fetchAssignments, submitAssignment } = useClassStore();
@@ -13,8 +60,7 @@ const AssignmentSubmission = () => {
 
   useEffect(() => {
     if (user) {
-      // Fetch assignments for all enrolled classes
-      fetchAssignments();
+      fetchAssignments(user.uid, user.role);
     }
   }, [user, fetchAssignments]);
 
@@ -88,13 +134,13 @@ const AssignmentSubmission = () => {
               <div className={`px-3 py-1 rounded-full text-sm ${
                 assignment.submitted
                   ? 'bg-green-100 text-green-600'
-                  : new Date(assignment.dueDate?.toDate()) > new Date()
+                  : !isDatePassed(assignment.dueDate)
                   ? 'bg-yellow-100 text-yellow-600'
                   : 'bg-red-100 text-red-600'
               }`}>
                 {assignment.submitted
                   ? 'Submitted'
-                  : new Date(assignment.dueDate?.toDate()) > new Date()
+                  : !isDatePassed(assignment.dueDate)
                   ? 'Pending'
                   : 'Overdue'}
               </div>
@@ -102,9 +148,9 @@ const AssignmentSubmission = () => {
 
             <p className="text-gray-600 mb-4">{assignment.description}</p>
 
-            <div className="flex items-center gap-2 text-sm text-gray-600 mb-4">
+            <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
               <FaClock />
-              <span>Due: {new Date(assignment.dueDate?.toDate()).toLocaleDateString()}</span>
+              <span>Due: {formatDate(assignment.dueDate)}</span>
             </div>
 
             {!assignment.submitted && (
@@ -143,7 +189,7 @@ const AssignmentSubmission = () => {
             {assignment.submitted && (
               <div className="flex items-center gap-2 text-green-600">
                 <FaCheckCircle />
-                <span>Submitted on {new Date(assignment.submittedAt?.toDate()).toLocaleDateString()}</span>
+                <span>Submitted on {formatDate(assignment.submittedAt)}</span>
                 {assignment.fileUrl && (
                   <a
                     href={assignment.fileUrl}

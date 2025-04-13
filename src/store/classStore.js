@@ -308,10 +308,11 @@ const useClassStore = create((set, get) => ({
       }
 
       const assignmentsRef = collection(db, 'assignments');
-      let q;
+      let assignmentsQuery;
 
       if (role === 'teacher') {
-        q = query(assignmentsRef, where('teacherId', '==', userId));
+        // Teachers see assignments they created
+        assignmentsQuery = query(assignmentsRef, where('teacherId', '==', userId));
       } else if (role === 'student') {
         // First get the student's classes
         const classesRef = collection(db, 'classes');
@@ -323,31 +324,47 @@ const useClassStore = create((set, get) => ({
           return;
         }
 
+        // Get all class IDs the student is enrolled in
         const classIds = classesSnapshot.docs.map(doc => doc.id);
-        q = query(assignmentsRef, where('classId', 'in', classIds));
+        
+        // Get assignments for these classes
+        assignmentsQuery = query(assignmentsRef, where('classId', 'in', classIds));
       } else {
         set({ assignments: [], loading: false });
         return;
       }
 
-      const querySnapshot = await getDocs(q);
-      const assignmentsData = querySnapshot.docs.map(doc => {
+      const querySnapshot = await getDocs(assignmentsQuery);
+      const assignmentsData = await Promise.all(querySnapshot.docs.map(async doc => {
         const data = doc.data();
+        
         // Convert Firestore Timestamps to JavaScript Dates
         const dueDate = data.dueDate ? new Date(data.dueDate.seconds * 1000) : null;
         const createdAt = data.createdAt ? new Date(data.createdAt.seconds * 1000) : null;
-        const submittedAt = data.submittedAt ? new Date(data.submittedAt.seconds * 1000) : null;
+
+        // Get submission for this student if role is student
+        let submitted = false;
+        if (role === 'student') {
+          const submissionsRef = collection(db, 'submissions');
+          const submissionQuery = query(
+            submissionsRef,
+            where('assignmentId', '==', doc.id),
+            where('studentId', '==', userId)
+          );
+          const submissionSnapshot = await getDocs(submissionQuery);
+          submitted = !submissionSnapshot.empty;
+        }
 
         return {
           id: doc.id,
           ...data,
           dueDate,
           createdAt,
-          submittedAt,
+          submitted,
           attachments: data.attachments || [],
           submissions: data.submissions || []
         };
-      });
+      }));
 
       set({ assignments: assignmentsData, loading: false });
     } catch (error) {
@@ -360,18 +377,13 @@ const useClassStore = create((set, get) => ({
     }
   },
 
-  createAssignment: async (assignmentData, files) => {
+  createAssignment: async (assignmentData) => {
     try {
       set({ loading: true, error: null });
-      const uploadedFiles = [];
 
-      if (files && files.length > 0) {
-        for (const file of files) {
-          const storageRef = ref(storage, `assignments/${file.name}`);
-          await uploadBytes(storageRef, file);
-          const url = await getDownloadURL(storageRef);
-          uploadedFiles.push({ name: file.name, url });
-        }
+      // Ensure required fields are present
+      if (!assignmentData.title || !assignmentData.classId || !assignmentData.teacherId) {
+        throw new Error('Missing required fields');
       }
 
       // Convert dueDate to Timestamp if it's a Date
@@ -379,25 +391,37 @@ const useClassStore = create((set, get) => ({
         ? Timestamp.fromDate(assignmentData.dueDate)
         : assignmentData.dueDate;
 
-      const docRef = await addDoc(collection(db, 'assignments'), {
+      // Prepare assignment data
+      const assignment = {
         ...assignmentData,
         dueDate: dueDateTimestamp,
-        files: uploadedFiles,
         createdAt: serverTimestamp(),
-      });
+        attachments: assignmentData.attachments || [],
+        submissions: [],
+        status: 'active'
+      };
+
+      // Create the assignment document
+      const docRef = await addDoc(collection(db, 'assignments'), assignment);
+
+      // Update local state
+      const newAssignment = {
+        id: docRef.id,
+        ...assignment,
+        dueDate: assignmentData.dueDate, // Use the original Date object for local state
+        createdAt: new Date(),
+      };
 
       set(state => ({
-        assignments: [...state.assignments, { 
-          id: docRef.id, 
-          ...assignmentData,
-          dueDate: assignmentData.dueDate,
-          files: uploadedFiles 
-        }],
+        assignments: [...state.assignments, newAssignment],
         loading: false
       }));
+
+      return docRef.id;
     } catch (error) {
       console.error('Error creating assignment:', error);
       set({ error: error.message, loading: false });
+      throw error;
     }
   },
 

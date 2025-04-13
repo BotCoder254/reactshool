@@ -4,15 +4,63 @@ import { FaBook, FaTasks, FaCheckCircle, FaClock } from 'react-icons/fa';
 import useAuthStore from '../../../store/authStore';
 import useClassStore from '../../../store/classStore';
 
+const formatDate = (date) => {
+  if (!date) return 'N/A';
+  try {
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
+      // Handle Firestore Timestamp
+      dateObj = date.toDate();
+    } else if (typeof date === 'string') {
+      // Handle string date
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      // Handle Date object
+      dateObj = date;
+    } else {
+      // Handle any other format
+      dateObj = new Date(date);
+    }
+
+    if (isNaN(dateObj.getTime())) {
+      return 'Invalid date';
+    }
+
+    return dateObj.toLocaleDateString();
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
+
+const isDatePassed = (date) => {
+  if (!date) return false;
+  try {
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
+      dateObj = date.toDate();
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else {
+      dateObj = new Date(date);
+    }
+    return dateObj < new Date();
+  } catch (error) {
+    console.error('Error comparing dates:', error);
+    return false;
+  }
+};
+
 const StudentDashboard = () => {
   const { user } = useAuthStore();
-  const { classes, assignments, loading, fetchClasses } = useClassStore();
+  const { classes, assignments, loading, fetchClasses, fetchAssignments } = useClassStore();
 
   useEffect(() => {
     if (user) {
       fetchClasses(user.uid, 'student');
+      fetchAssignments(user.uid, 'student');
     }
-  }, [user, fetchClasses]);
+  }, [user, fetchClasses, fetchAssignments]);
 
   const stats = [
     {
@@ -131,19 +179,17 @@ const StudentDashboard = () => {
                     {assignment.title}
                   </h3>
                   <p className="text-sm text-gray-600">
-                    Due: {new Date(assignment.dueDate?.toDate()).toLocaleDateString()}
+                    Due: {formatDate(assignment.dueDate)}
                   </p>
                 </div>
                 <span
                   className={`px-3 py-1 rounded-full text-sm ${
-                    new Date(assignment.dueDate?.toDate()) > new Date()
+                    !isDatePassed(assignment.dueDate)
                       ? 'bg-green-100 text-green-600'
                       : 'bg-red-100 text-red-600'
                   }`}
                 >
-                  {new Date(assignment.dueDate?.toDate()) > new Date()
-                    ? 'Upcoming'
-                    : 'Past Due'}
+                  {!isDatePassed(assignment.dueDate) ? 'Upcoming' : 'Past Due'}
                 </span>
               </div>
             ))}

@@ -1,28 +1,33 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FaFileAlt, FaUpload, FaSpinner, FaExclamationCircle } from 'react-icons/fa';
+import { Link } from 'react-router-dom';
+import { FaFileAlt, FaUpload, FaSpinner, FaExclamationCircle, FaCalendar, FaCheckCircle, FaClock } from 'react-icons/fa';
 import useClassStore from '../../../store/classStore';
 import useAuthStore from '../../../store/authStore';
 
 const formatDate = (date) => {
   if (!date) return 'No due date';
   try {
-    if (date.toDate) {
+    let dateObj;
+    if (typeof date === 'object' && date.toDate) {
       // Handle Firestore Timestamp
-      date = date.toDate();
+      dateObj = date.toDate();
     } else if (typeof date === 'string') {
       // Handle string date
-      date = new Date(date);
-    } else if (!(date instanceof Date)) {
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      // Handle Date object
+      dateObj = date;
+    } else {
       // Handle any other format
-      date = new Date(date);
+      dateObj = new Date(date);
     }
 
-    if (isNaN(date.getTime())) {
+    if (isNaN(dateObj.getTime())) {
       return 'Invalid date';
     }
 
-    return date.toLocaleDateString(undefined, {
+    return dateObj.toLocaleDateString(undefined, {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -37,51 +42,14 @@ const formatDate = (date) => {
 
 const AssignmentView = () => {
   const { user } = useAuthStore();
-  const { assignments, loading, error, fetchAssignments, submitAssignment } = useClassStore();
+  const { assignments, loading, error, fetchAssignments } = useClassStore();
   const [selectedAssignment, setSelectedAssignment] = useState(null);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
 
   useEffect(() => {
     if (user?.uid) {
       fetchAssignments(user.uid, user.role);
     }
   }, [user, fetchAssignments]);
-
-  const handleFileChange = (e, assignmentId) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        setUploadError('File size should be less than 10MB');
-        return;
-      }
-      setSelectedFile(file);
-      setSelectedAssignment(assignmentId);
-      setUploadError(null);
-    }
-  };
-
-  const handleSubmit = async (assignmentId) => {
-    if (!selectedFile) return;
-
-    try {
-      setSubmitting(true);
-      await submitAssignment(assignmentId, {
-        studentId: user.uid,
-        file: selectedFile,
-        submittedAt: new Date()
-      });
-      
-      setSelectedFile(null);
-      setSelectedAssignment(null);
-      setUploadError(null);
-    } catch (error) {
-      setUploadError(error.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const isOverdue = (dueDate) => {
     if (!dueDate) return false;
@@ -118,13 +86,6 @@ const AssignmentView = () => {
         </div>
       </div>
       
-      {uploadError && (
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-center gap-2">
-          <FaExclamationCircle />
-          <span>{uploadError}</span>
-        </div>
-      )}
-      
       {assignments.length === 0 ? (
         <div className="text-center py-12">
           <img
@@ -132,7 +93,8 @@ const AssignmentView = () => {
             alt="No assignments"
             className="w-48 h-48 mx-auto mb-4"
           />
-          <p className="text-gray-600">No assignments available.</p>
+          <h3 className="text-xl font-semibold text-gray-800 mb-2">No Assignments Found</h3>
+          <p className="text-gray-600">You don't have any assignments at the moment.</p>
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -140,90 +102,80 @@ const AssignmentView = () => {
             <motion.div
               key={assignment.id}
               whileHover={{ scale: 1.02 }}
-              className="p-6 bg-white rounded-lg shadow-lg"
+              className={`p-6 bg-white rounded-lg shadow-lg border-l-4 ${
+                assignment.submitted 
+                  ? 'border-green-500' 
+                  : isOverdue(assignment.dueDate)
+                    ? 'border-red-500'
+                    : 'border-primary'
+              }`}
             >
-              <h3 className="text-lg font-semibold text-gray-800">{assignment.title}</h3>
-              <p className="mt-2 text-gray-600">{assignment.description}</p>
+              <div className="flex justify-between items-start mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">{assignment.title}</h3>
+                {assignment.submitted ? (
+                  <span className="px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full flex items-center gap-1">
+                    <FaCheckCircle /> Submitted
+                  </span>
+                ) : isOverdue(assignment.dueDate) ? (
+                  <span className="px-2 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-full flex items-center gap-1">
+                    <FaClock /> Overdue
+                  </span>
+                ) : (
+                  <span className="px-2 py-1 text-xs font-medium text-primary bg-primary/10 rounded-full flex items-center gap-1">
+                    <FaClock /> Pending
+                  </span>
+                )}
+              </div>
+
+              <p className="text-gray-600 mb-4 line-clamp-2">{assignment.description}</p>
               
-              <div className="mt-4 text-sm text-gray-500">
-                Due: {formatDate(assignment.dueDate)}
+              <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+                <FaCalendar />
+                <span>Due: {formatDate(assignment.dueDate)}</span>
               </div>
               
-              {assignment.files?.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="font-medium text-gray-700">Assignment Files:</h4>
-                  <div className="mt-2 space-y-2">
-                    {assignment.files.map((file) => (
+              {assignment.attachments?.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-sm font-medium text-gray-700 mb-2">Assignment Files:</div>
+                  <div className="space-y-2">
+                    {assignment.attachments.map((file, index) => (
                       <a
-                        key={file.url}
+                        key={index}
                         href={file.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center text-primary hover:underline"
+                        className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg hover:bg-gray-100 text-sm text-primary transition-colors"
                       >
-                        <FaFileAlt className="mr-2" />
-                        {file.name}
+                        <FaFileAlt />
+                        <span className="truncate">{file.name}</span>
                       </a>
                     ))}
                   </div>
                 </div>
               )}
 
-              {!assignment.submitted ? (
-                <div className="mt-4 space-y-4">
-                  <div className="flex items-center gap-4">
-                    <input
-                      type="file"
-                      onChange={(e) => handleFileChange(e, assignment.id)}
-                      className="hidden"
-                      id={`file-upload-${assignment.id}`}
-                      accept=".pdf,.doc,.docx,.txt"
-                    />
-                    <label
-                      htmlFor={`file-upload-${assignment.id}`}
-                      className={`flex-1 flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg cursor-pointer ${
-                        isOverdue(assignment.dueDate)
-                          ? 'bg-red-500 hover:bg-red-600'
-                          : 'bg-primary hover:bg-primary-dark'
-                      }`}
-                    >
-                      <FaUpload />
-                      {selectedFile && selectedAssignment === assignment.id
-                        ? selectedFile.name
-                        : 'Choose File'}
-                    </label>
-                    {selectedFile && selectedAssignment === assignment.id && (
-                      <button
-                        onClick={() => handleSubmit(assignment.id)}
-                        disabled={submitting}
-                        className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 flex items-center gap-2"
-                      >
-                        {submitting ? (
-                          <>
-                            <FaSpinner className="animate-spin" />
-                            Submitting...
-                          </>
-                        ) : (
-                          'Submit'
-                        )}
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Accepted formats: PDF, DOC, DOCX, TXT (Max 10MB)
-                  </p>
-                  {isOverdue(assignment.dueDate) && (
-                    <p className="text-xs text-red-500">
-                      This assignment is overdue. Late submissions may be penalized.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-4 text-green-500 font-medium flex items-center gap-2">
-                  <FaFileAlt />
-                  Submitted
-                </div>
-              )}
+              <Link
+                to={`/dashboard/student/submission/${assignment.id}`}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2 mt-4 rounded-lg text-white transition-colors ${
+                  assignment.submitted
+                    ? 'bg-green-500 hover:bg-green-600'
+                    : isOverdue(assignment.dueDate)
+                      ? 'bg-red-500 hover:bg-red-600'
+                      : 'bg-primary hover:bg-primary-dark'
+                }`}
+              >
+                {assignment.submitted ? (
+                  <>
+                    <FaCheckCircle />
+                    View Submission
+                  </>
+                ) : (
+                  <>
+                    <FaUpload />
+                    Submit Assignment
+                  </>
+                )}
+              </Link>
             </motion.div>
           ))}
         </div>
