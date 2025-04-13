@@ -11,10 +11,22 @@ import {
   getDoc,
   arrayUnion,
   arrayRemove,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase/config';
+
+const formatDate = (timestamp) => {
+  if (!timestamp) return null;
+  if (timestamp instanceof Timestamp) {
+    return timestamp.toDate();
+  }
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  return null;
+};
 
 const useClassStore = create((set, get) => ({
   classes: [],
@@ -23,40 +35,92 @@ const useClassStore = create((set, get) => ({
   loading: false,
   error: null,
 
+  // File Upload
+  uploadFile: async (file, onProgress) => {
+    try {
+      // Check file size (100MB limit)
+      const maxSize = 100 * 1024 * 1024; // 100MB in bytes
+      if (file.size > maxSize) {
+        throw new Error('File size exceeds 100MB limit');
+      }
+
+      const storageRef = ref(storage, `assignments/${file.name}-${Date.now()}`);
+      
+      return new Promise((resolve, reject) => {
+        const uploadTask = uploadBytes(storageRef, file);
+
+        // Handle the upload completion
+        uploadTask
+          .then(async (snapshot) => {
+            // Clear any existing progress simulation
+            if (window.progressInterval) {
+              clearInterval(window.progressInterval);
+            }
+            // Set progress to 100% immediately upon completion
+            if (onProgress) {
+              onProgress(100);
+            }
+            const downloadURL = await getDownloadURL(snapshot.ref);
+            resolve(downloadURL);
+          })
+          .catch((error) => {
+            // Clear progress simulation on error
+            if (window.progressInterval) {
+              clearInterval(window.progressInterval);
+            }
+            console.error('Error uploading file:', error);
+            reject(error);
+          });
+
+        // Improved progress simulation
+        if (onProgress) {
+          let progress = 0;
+          const simulateProgress = () => {
+            if (progress < 98) {
+              // Slower progress as we get closer to 98%
+              const increment = Math.max(1, (98 - progress) / 10);
+              progress += increment;
+              onProgress(Math.min(98, progress));
+            }
+          };
+
+          // Clear any existing interval
+          if (window.progressInterval) {
+            clearInterval(window.progressInterval);
+          }
+
+          // Start new progress simulation
+          window.progressInterval = setInterval(simulateProgress, 200);
+        }
+      });
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      throw error;
+    }
+  },
+
   // Class Management
   fetchClasses: async (userId, role) => {
     try {
       set({ loading: true, error: null });
       const classesRef = collection(db, 'classes');
-      const q = role === 'teacher'
-        ? query(classesRef, where('teacherId', '==', userId))
-        : query(classesRef, where('studentIds', 'array-contains', userId));
+      let q;
 
-      const snapshot = await getDocs(q);
-      const classesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      // Fetch students for each class if teacher
       if (role === 'teacher') {
-        const classesWithStudents = await Promise.all(
-          classesData.map(async (cls) => {
-            if (!cls.studentIds?.length) return { ...cls, students: [] };
-
-            const studentsData = await Promise.all(
-              cls.studentIds.map(async (studentId) => {
-                const studentDoc = await getDoc(doc(db, 'users', studentId));
-                return { id: studentId, ...studentDoc.data() };
-              })
-            );
-
-            return { ...cls, students: studentsData };
-          })
-        );
-
-        set({ classes: classesWithStudents, loading: false });
+        q = query(classesRef, where('teacherId', '==', userId));
       } else {
-        set({ classes: classesData, loading: false });
+        q = query(classesRef, where('studentIds', 'array-contains', userId));
       }
+
+      const querySnapshot = await getDocs(q);
+      const classesData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      set({ classes: classesData, loading: false });
     } catch (error) {
+      console.error('Error fetching classes:', error);
       set({ error: error.message, loading: false });
     }
   },
@@ -68,30 +132,33 @@ const useClassStore = create((set, get) => ({
         ...classData,
         createdAt: serverTimestamp(),
         studentIds: [],
-        assignments: []
       });
-      const newClass = { id: docRef.id, ...classData };
-      set(state => ({ classes: [...state.classes, newClass], loading: false }));
-      return newClass;
+      
+      set(state => ({
+        classes: [...state.classes, { id: docRef.id, ...classData }],
+        loading: false
+      }));
     } catch (error) {
+      console.error('Error creating class:', error);
       set({ error: error.message, loading: false });
-      throw error;
     }
   },
 
   updateClass: async (classId, updates) => {
     try {
       set({ loading: true, error: null });
-      await updateDoc(doc(db, 'classes', classId), updates);
+      const classRef = doc(db, 'classes', classId);
+      await updateDoc(classRef, updates);
+      
       set(state => ({
-        classes: state.classes.map(c => 
-          c.id === classId ? { ...c, ...updates } : c
+        classes: state.classes.map(cls => 
+          cls.id === classId ? { ...cls, ...updates } : cls
         ),
         loading: false
       }));
     } catch (error) {
+      console.error('Error updating class:', error);
       set({ error: error.message, loading: false });
-      throw error;
     }
   },
 
@@ -99,13 +166,14 @@ const useClassStore = create((set, get) => ({
     try {
       set({ loading: true, error: null });
       await deleteDoc(doc(db, 'classes', classId));
+      
       set(state => ({
-        classes: state.classes.filter(c => c.id !== classId),
+        classes: state.classes.filter(cls => cls.id !== classId),
         loading: false
       }));
     } catch (error) {
+      console.error('Error deleting class:', error);
       set({ error: error.message, loading: false });
-      throw error;
     }
   },
 
@@ -195,121 +263,184 @@ const useClassStore = create((set, get) => ({
   joinClassByCode: async (classCode, studentId) => {
     try {
       set({ loading: true, error: null });
-      
-      // Find class by code
       const classesRef = collection(db, 'classes');
       const q = query(classesRef, where('classCode', '==', classCode));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
         throw new Error('Invalid class code');
       }
 
-      const classDoc = snapshot.docs[0];
+      const classDoc = querySnapshot.docs[0];
       const classData = classDoc.data();
 
-      // Check if student is already enrolled
       if (classData.studentIds?.includes(studentId)) {
         throw new Error('You are already enrolled in this class');
       }
 
-      // Check if class is full
-      if (classData.studentIds?.length >= classData.maxStudents) {
-        throw new Error('Class is full');
-      }
-
-      // Add student to class
+      const updatedStudentIds = [...(classData.studentIds || []), studentId];
       await updateDoc(doc(db, 'classes', classDoc.id), {
-        studentIds: arrayUnion(studentId)
+        studentIds: updatedStudentIds
       });
 
-      // Update local state
-      const updatedClass = { id: classDoc.id, ...classData, studentIds: [...(classData.studentIds || []), studentId] };
       set(state => ({
-        classes: [...state.classes, updatedClass],
+        classes: [...state.classes, { id: classDoc.id, ...classData }],
         loading: false
       }));
+    } catch (error) {
+      console.error('Error joining class:', error);
+      set({ error: error.message, loading: false });
+    }
+  },
 
-      return updatedClass;
+  // Assignment Management
+  fetchAssignments: async (userId, role) => {
+    try {
+      set({ loading: true, error: null });
+      const assignmentsRef = collection(db, 'assignments');
+      let q;
+
+      if (role === 'teacher') {
+        q = query(assignmentsRef, where('teacherId', '==', userId));
+      } else {
+        const classesSnapshot = await getDocs(
+          query(collection(db, 'classes'), where('studentIds', 'array-contains', userId))
+        );
+        const classIds = classesSnapshot.docs.map(doc => doc.id);
+        if (classIds.length === 0) {
+          set({ assignments: [], loading: false });
+          return;
+        }
+        q = query(assignmentsRef, where('classId', 'in', classIds));
+      }
+
+      const querySnapshot = await getDocs(q);
+      const assignmentsData = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: formatDate(data.createdAt),
+          dueDate: formatDate(data.dueDate),
+          submittedAt: formatDate(data.submittedAt)
+        };
+      });
+
+      set({ assignments: assignmentsData, loading: false });
+    } catch (error) {
+      console.error('Error fetching assignments:', error);
+      set({ error: error.message, loading: false });
+    }
+  },
+
+  createAssignment: async (assignmentData, files) => {
+    try {
+      set({ loading: true, error: null });
+      const uploadedFiles = [];
+
+      if (files && files.length > 0) {
+        for (const file of files) {
+          const storageRef = ref(storage, `assignments/${file.name}`);
+          await uploadBytes(storageRef, file);
+          const url = await getDownloadURL(storageRef);
+          uploadedFiles.push({ name: file.name, url });
+        }
+      }
+
+      // Convert dueDate to Timestamp if it's a Date
+      const dueDateTimestamp = assignmentData.dueDate instanceof Date 
+        ? Timestamp.fromDate(assignmentData.dueDate)
+        : assignmentData.dueDate;
+
+      const docRef = await addDoc(collection(db, 'assignments'), {
+        ...assignmentData,
+        dueDate: dueDateTimestamp,
+        files: uploadedFiles,
+        createdAt: serverTimestamp(),
+      });
+
+      set(state => ({
+        assignments: [...state.assignments, { 
+          id: docRef.id, 
+          ...assignmentData,
+          dueDate: assignmentData.dueDate,
+          files: uploadedFiles 
+        }],
+        loading: false
+      }));
+    } catch (error) {
+      console.error('Error creating assignment:', error);
+      set({ error: error.message, loading: false });
+    }
+  },
+
+  updateAssignment: async (assignmentId, data) => {
+    try {
+      set({ loading: true, error: null });
+      await updateDoc(doc(db, 'assignments', assignmentId), data);
+      set({ loading: false });
     } catch (error) {
       set({ error: error.message, loading: false });
       throw error;
     }
   },
 
-  // Assignment Management
-  fetchAssignments: async (classId) => {
+  deleteAssignment: async (assignmentId) => {
     try {
       set({ loading: true, error: null });
-      const q = query(
-        collection(db, 'assignments'),
-        where('classId', '==', classId)
-      );
-      const snapshot = await getDocs(q);
-      const assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      await deleteDoc(doc(db, 'assignments', assignmentId));
+      const assignments = get().assignments.filter(a => a.id !== assignmentId);
       set({ assignments, loading: false });
     } catch (error) {
       set({ error: error.message, loading: false });
-    }
-  },
-
-  createAssignment: async (assignmentData) => {
-    try {
-      set({ loading: true, error: null });
-      const docRef = await addDoc(collection(db, 'assignments'), {
-        ...assignmentData,
-        createdAt: serverTimestamp()
-      });
-      const newAssignment = { id: docRef.id, ...assignmentData };
-      set(state => ({
-        assignments: [...state.assignments, newAssignment],
-        loading: false
-      }));
-    } catch (error) {
-      set({ error: error.message, loading: false });
+      throw error;
     }
   },
 
   // Submission Management
-  submitAssignment: async (submissionData, file) => {
+  submitAssignment: async (assignmentId, submission) => {
     try {
       set({ loading: true, error: null });
-      let fileUrl = null;
-
-      if (file) {
-        const storageRef = ref(storage, `submissions/${file.name}-${Date.now()}`);
-        await uploadBytes(storageRef, file);
-        fileUrl = await getDownloadURL(storageRef);
-      }
-
-      const docRef = await addDoc(collection(db, 'submissions'), {
-        ...submissionData,
-        fileUrl,
+      
+      // Create a new submission document instead of updating
+      const submissionRef = await addDoc(collection(db, 'submissions'), {
+        assignmentId,
+        ...submission,
         submittedAt: serverTimestamp()
       });
 
-      const newSubmission = { id: docRef.id, ...submissionData, fileUrl };
       set(state => ({
-        submissions: [...state.submissions, newSubmission],
+        assignments: state.assignments.map(assignment =>
+          assignment.id === assignmentId
+            ? { ...assignment, submitted: true }
+            : assignment
+        ),
         loading: false
       }));
+
+      return submissionRef.id;
     } catch (error) {
+      console.error('Error submitting assignment:', error);
       set({ error: error.message, loading: false });
+      throw error;
     }
   },
 
   fetchSubmissions: async (assignmentId) => {
     try {
       set({ loading: true, error: null });
-      const q = query(
-        collection(db, 'submissions'),
-        where('assignmentId', '==', assignmentId)
-      );
-      const snapshot = await getDocs(q);
-      const submissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      set({ submissions, loading: false });
+      const submissionsRef = collection(db, 'submissions');
+      const q = query(submissionsRef, where('assignmentId', '==', assignmentId));
+      const querySnapshot = await getDocs(q);
+      
+      return querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
     } catch (error) {
+      console.error('Error fetching submissions:', error);
       set({ error: error.message, loading: false });
+      return [];
     }
   },
 

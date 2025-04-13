@@ -21,11 +21,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize services
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const rtdb = getDatabase(app);
-export const storage = getStorage(app);
-export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+const auth = getAuth(app);
+const db = getFirestore(app);
+const rtdb = getDatabase(app);
+const storage = getStorage(app);
+const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 
 // Enable persistence for Firestore
 if (typeof window !== 'undefined') {
@@ -39,4 +39,8 @@ if (typeof window !== 'undefined') {
         console.log('Persistence not supported by browser');
       }
     });
-} 
+}
+
+// Export initialized services
+export { auth, db, rtdb, storage, analytics };
+export default app; 
