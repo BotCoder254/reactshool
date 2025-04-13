@@ -6,13 +6,33 @@ import useAuthStore from '../../../store/authStore';
 
 const formatDate = (date) => {
   if (!date) return 'No due date';
-  return new Date(date).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  try {
+    if (date.toDate) {
+      // Handle Firestore Timestamp
+      date = date.toDate();
+    } else if (typeof date === 'string') {
+      // Handle string date
+      date = new Date(date);
+    } else if (!(date instanceof Date)) {
+      // Handle any other format
+      date = new Date(date);
+    }
+
+    if (isNaN(date.getTime())) {
+      return 'Invalid date';
+    }
+
+    return date.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
 };
 
 const AssignmentView = () => {

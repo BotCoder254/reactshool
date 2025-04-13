@@ -297,39 +297,66 @@ const useClassStore = create((set, get) => ({
   fetchAssignments: async (userId, role) => {
     try {
       set({ loading: true, error: null });
+
+      // Early return if user is not logged in
+      if (!userId || !role) {
+        set({ 
+          assignments: [],
+          loading: false
+        });
+        return;
+      }
+
       const assignmentsRef = collection(db, 'assignments');
       let q;
 
       if (role === 'teacher') {
         q = query(assignmentsRef, where('teacherId', '==', userId));
-      } else {
-        const classesSnapshot = await getDocs(
-          query(collection(db, 'classes'), where('studentIds', 'array-contains', userId))
-        );
-        const classIds = classesSnapshot.docs.map(doc => doc.id);
-        if (classIds.length === 0) {
+      } else if (role === 'student') {
+        // First get the student's classes
+        const classesRef = collection(db, 'classes');
+        const classesQuery = query(classesRef, where('studentIds', 'array-contains', userId));
+        const classesSnapshot = await getDocs(classesQuery);
+        
+        if (classesSnapshot.empty) {
           set({ assignments: [], loading: false });
           return;
         }
+
+        const classIds = classesSnapshot.docs.map(doc => doc.id);
         q = query(assignmentsRef, where('classId', 'in', classIds));
+      } else {
+        set({ assignments: [], loading: false });
+        return;
       }
 
       const querySnapshot = await getDocs(q);
       const assignmentsData = querySnapshot.docs.map(doc => {
         const data = doc.data();
+        // Convert Firestore Timestamps to JavaScript Dates
+        const dueDate = data.dueDate ? new Date(data.dueDate.seconds * 1000) : null;
+        const createdAt = data.createdAt ? new Date(data.createdAt.seconds * 1000) : null;
+        const submittedAt = data.submittedAt ? new Date(data.submittedAt.seconds * 1000) : null;
+
         return {
           id: doc.id,
           ...data,
-          createdAt: formatDate(data.createdAt),
-          dueDate: formatDate(data.dueDate),
-          submittedAt: formatDate(data.submittedAt)
+          dueDate,
+          createdAt,
+          submittedAt,
+          attachments: data.attachments || [],
+          submissions: data.submissions || []
         };
       });
 
       set({ assignments: assignmentsData, loading: false });
     } catch (error) {
       console.error('Error fetching assignments:', error);
-      set({ error: error.message, loading: false });
+      set({ 
+        error: error.message || 'Error fetching assignments', 
+        loading: false,
+        assignments: []
+      });
     }
   },
 

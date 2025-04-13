@@ -25,6 +25,8 @@ import EnrolledClasses from './components/Dashboard/Student/EnrolledClasses';
 import AssignmentSubmission from './components/Dashboard/Student/AssignmentSubmission';
 import GradedAssignments from './components/Dashboard/Student/GradedAssignments';
 import Settings from './components/Dashboard/Settings';
+import StudentSubmission from './components/Dashboard/Student/StudentSubmission';
+import SubmissionReview from './components/Dashboard/Teacher/SubmissionReview';
 
 const LandingPage = () => (
   <div>
@@ -77,6 +79,7 @@ const App = () => {
           <Route path="teacher">
             <Route path="classes" element={user?.role === 'teacher' ? <ClassManagement /> : <Navigate to="/dashboard" />} />
             <Route path="assignments" element={user?.role === 'teacher' ? <AssignmentManagement /> : <Navigate to="/dashboard" />} />
+            <Route path="submissions/:assignmentId" element={user?.role === 'teacher' ? <SubmissionReview /> : <Navigate to="/dashboard" />} />
           </Route>
           
           {/* Student Routes */}
@@ -84,6 +87,7 @@ const App = () => {
             <Route path="classes" element={user?.role === 'student' ? <EnrolledClasses /> : <Navigate to="/dashboard" />} />
             <Route path="assignments" element={user?.role === 'student' ? <AssignmentSubmission /> : <Navigate to="/dashboard" />} />
             <Route path="graded" element={user?.role === 'student' ? <GradedAssignments /> : <Navigate to="/dashboard" />} />
+            <Route path="submission/:assignmentId" element={user?.role === 'student' ? <StudentSubmission /> : <Navigate to="/dashboard" />} />
           </Route>
           
           {/* Common Routes */}

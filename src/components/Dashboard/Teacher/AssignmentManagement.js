@@ -7,6 +7,22 @@ import useClassStore from '../../../store/classStore';
 import useAuthStore from '../../../store/authStore';
 import toast, { Toaster } from 'react-hot-toast';
 
+const formatDate = (date) => {
+  if (!date) return 'No due date';
+  try {
+    if (date instanceof Date) {
+      return date.toLocaleDateString();
+    }
+    if (date.toDate) {
+      return date.toDate().toLocaleDateString();
+    }
+    return new Date(date).toLocaleDateString();
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
+
 const AssignmentManagement = () => {
   const { user } = useAuthStore();
   const { classes, assignments, loading, error, fetchClasses, fetchAssignments, createAssignment, updateAssignment, deleteAssignment, uploadFile } = useClassStore();
@@ -118,7 +134,7 @@ const AssignmentManagement = () => {
       title: assignment.title,
       description: assignment.description,
       classId: assignment.classId,
-      dueDate: assignment.dueDate?.toDate().toISOString().split('T')[0],
+      dueDate: assignment.dueDate ? new Date(assignment.dueDate).toISOString().split('T')[0] : '',
       points: assignment.points,
       instructions: assignment.instructions,
       allowedFileTypes: assignment.allowedFileTypes,
@@ -235,7 +251,7 @@ const AssignmentManagement = () => {
             )}
 
             <div className="flex items-center justify-between text-sm text-gray-600">
-              <div>Due: {new Date(assignment.dueDate?.toDate()).toLocaleDateString()}</div>
+              <div>Due: {formatDate(assignment.dueDate)}</div>
               <div>Points: {assignment.points}</div>
             </div>
 
@@ -245,7 +261,7 @@ const AssignmentManagement = () => {
                   Submissions: {assignment.submissions?.length || 0}
                 </span>
                 <Link
-                  to={`/dashboard/submissions/${assignment.id}`}
+                  to={`/dashboard/teacher/submissions/${assignment.id}`}
                   className="text-primary hover:underline"
                 >
                   View Details →

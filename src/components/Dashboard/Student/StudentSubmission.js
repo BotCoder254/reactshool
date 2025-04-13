@@ -4,6 +4,23 @@ import { useParams } from 'react-router-dom';
 import { FaUpload, FaFile, FaSpinner, FaCheck, FaTimes } from 'react-icons/fa';
 import useClassStore from '../../../store/classStore';
 import useAuthStore from '../../../store/authStore';
+import { storage } from '../../../firebase/config';
+
+const formatDate = (date) => {
+  if (!date) return 'Not available';
+  try {
+    if (date instanceof Date) {
+      return date.toLocaleString();
+    }
+    if (date.toDate) {
+      return date.toDate().toLocaleString();
+    }
+    return new Date(date).toLocaleString();
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
 
 const StudentSubmission = () => {
   const { assignmentId } = useParams();
@@ -16,16 +33,22 @@ const StudentSubmission = () => {
   const [submission, setSubmission] = useState(null);
 
   useEffect(() => {
-    if (assignmentId) {
+    if (assignmentId && user) {
       loadAssignment();
     }
-  }, [assignmentId]);
+  }, [assignmentId, user]);
 
   const loadAssignment = async () => {
-    const data = await fetchAssignment(assignmentId);
-    setAssignment(data);
-    if (data.submission) {
-      setSubmission(data.submission);
+    try {
+      const data = await fetchAssignment(assignmentId);
+      if (data) {
+        setAssignment(data);
+        if (data.submission) {
+          setSubmission(data.submission);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading assignment:', error);
     }
   };
 
@@ -117,7 +140,7 @@ const StudentSubmission = () => {
           <div className="mt-4">
             <strong className="text-gray-700">Due Date:</strong>{' '}
             <span className="text-gray-600">
-              {new Date(assignment.dueDate?.toDate()).toLocaleString()}
+              {formatDate(assignment.dueDate)}
             </span>
           </div>
 
@@ -161,7 +184,7 @@ const StudentSubmission = () => {
               )}
 
               <div className="text-sm text-gray-500">
-                Submitted on: {new Date(submission.submittedAt?.toDate()).toLocaleString()}
+                Submitted on: {formatDate(submission.submittedAt)}
               </div>
 
               {submission.grade !== undefined && (
