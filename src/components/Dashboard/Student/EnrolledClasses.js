@@ -1,19 +1,33 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { FaBook, FaUserTie, FaClock, FaTasks } from 'react-icons/fa';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FaBook, FaUserTie, FaClock, FaTasks, FaPlus } from 'react-icons/fa';
 import useClassStore from '../../../store/classStore';
 import useAuthStore from '../../../store/authStore';
+import JoinClass from './JoinClass';
 
 const EnrolledClasses = () => {
   const { user } = useAuthStore();
   const { classes, loading, error, fetchClasses } = useClassStore();
   const [selectedClass, setSelectedClass] = useState(null);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('all');
 
   useEffect(() => {
     if (user) {
       fetchClasses(user.uid, 'student');
     }
   }, [user, fetchClasses]);
+
+  const filteredClasses = classes.filter(cls => {
+    switch (activeTab) {
+      case 'active':
+        return cls.assignments?.some(a => !a.submitted);
+      case 'completed':
+        return cls.assignments?.every(a => a.submitted);
+      default:
+        return true;
+    }
+  });
 
   if (loading) {
     return (
@@ -27,9 +41,12 @@ const EnrolledClasses = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800">My Classes</h1>
-        <div className="text-gray-600">
-          Total Classes: {classes.length}
-        </div>
+        <button
+          onClick={() => setShowJoinModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-secondary transition-colors"
+        >
+          <FaPlus /> Join Class
+        </button>
       </div>
 
       {error && (
@@ -38,8 +55,42 @@ const EnrolledClasses = () => {
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="flex space-x-4 border-b">
+        <button
+          onClick={() => setActiveTab('all')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'all'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-gray-600 hover:text-primary'
+          }`}
+        >
+          All Classes
+        </button>
+        <button
+          onClick={() => setActiveTab('active')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'active'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-gray-600 hover:text-primary'
+          }`}
+        >
+          Active
+        </button>
+        <button
+          onClick={() => setActiveTab('completed')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'completed'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-gray-600 hover:text-primary'
+          }`}
+        >
+          Completed
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {classes.map((cls) => (
+        {filteredClasses.map((cls) => (
           <motion.div
             key={cls.id}
             initial={{ opacity: 0, scale: 0.9 }}
@@ -70,7 +121,9 @@ const EnrolledClasses = () => {
               </div>
               <div className="flex items-center gap-2 text-gray-600">
                 <FaTasks className="text-primary" />
-                <span>{cls.assignments?.length || 0} Assignments</span>
+                <span>
+                  {cls.assignments?.filter(a => !a.submitted).length || 0} Pending Assignments
+                </span>
               </div>
             </div>
 
@@ -109,7 +162,7 @@ const EnrolledClasses = () => {
         ))}
       </div>
 
-      {classes.length === 0 && (
+      {filteredClasses.length === 0 && (
         <div className="text-center py-12">
           <img
             src="https://illustrations.popsy.co/white/taking-notes.svg"
@@ -120,10 +173,19 @@ const EnrolledClasses = () => {
             No Classes Found
           </h2>
           <p className="text-gray-600">
-            You are not enrolled in any classes yet.
+            Join your first class to get started.
           </p>
         </div>
       )}
+
+      {/* Join Class Modal */}
+      <AnimatePresence>
+        {showJoinModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <JoinClass onClose={() => setShowJoinModal(false)} />
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
